@@ -21,11 +21,9 @@ import json
 import re
 import string
 import urllib2
-from operator import itemgetter
 import httplib
 import urllib, cookielib
 from lxml.html import fromstring, tostring, parse, submit_form
-from lxml.html.clean import clean_html
 from bs4 import UnicodeDammit
 import logging
 
@@ -291,7 +289,6 @@ class Hemnet() :
 
                 brokers["totalItems"] = brokers["totalItems"]+1;
             except Exception,e:
-                print e
                 pass;
         return brokers;
 
@@ -299,14 +296,21 @@ class Hemnet() :
         Prints location result from locationSearch 
     '''
     def printLocations(self, data):
-        print "Hittade %s alternativ" % (len(data));
         for id, item in enumerate(data) :
-            item = item.get("location");
-            parent = item.get("parent_location");
-            print "%s %s %s" % (id, parent.get("name"), self.translatedTypes.get(parent.get("location_type")));
-            print "\tTyp: %s" % (self.translatedTypes.get(item.get("location_type")));
-            print "\tNamn: %s" % (item.get("name"));
+            print "%s %s" % (id, self.printableLocation(item))
 
+    '''
+        Prints one location
+    '''
+    def printableLocation(self, item):
+        item = item.get("location");
+        parent = item.get("parent_location");
+        locName = item.get("name");
+        locType = self.translatedTypes.get(item.get("location_type"));
+        parentLocType = self.translatedTypes.get(parent.get("location_type"));
+        parentLocName = parent.get("name");
+        return "%s %s\n\tTyp: %s\n\tNamn: %s" % (parentLocName, parentLocType,  locType, locName);
+    
     '''
         Prints Broker item
     '''
@@ -325,9 +329,10 @@ class Hemnet() :
     '''
         Print the header for search results
     '''
-    def printSearchHeader(self, result):
+    def printSearchHeader(self, result, location):
         print "\tHittade %s antal objekt" % result.get("totalItems");
         print "\tFrån %s antal mäklare" % len(result.get("results"));
+        print u"\tSökterm: \n\t\t%s" % self.printableLocation(location).replace('\t', '\t\t');
         print "\tOmrådesdata:"
         for key in result.get("area-avg").keys():
             print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), result.get("area-avg").get(key));
@@ -352,15 +357,16 @@ class Hemnet() :
         while(answer):
             query = raw_input("Sökterm: ");
             queryResponse = self.findLocations(query);
+            print "Hittade %s alternativ" % (len(queryResponse["locations"]));
             self.printLocations(queryResponse["locations"]);
 
             index = raw_input("Välj alternativ: ");
             result = self.makeSearch(queryResponse['search'][int(index)]);
-            self.printSearchHeader(result);
+            self.printSearchHeader(result, queryResponse['locations'][int(index)]);
             for idx, item in enumerate(result.get("results")[:10]):
                 self.printBroker(idx, item);
 
 if __name__ == "__main__":
     hemnet = Hemnet();
-    #hemnet.menu();
-    hemnet.parseLocal();
+    hemnet.menu();
+    #hemnet.parseLocal();
