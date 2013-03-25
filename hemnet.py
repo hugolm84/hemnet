@@ -65,8 +65,16 @@ class Hemnet() :
             "region" : u"Län",
             "street" : "Gata",
             "city" : "Stad"
-            }
-
+        }
+        self.translatedAverageTypes = {
+            "age" : u"List ålder",
+            "price" : "Medelpris",
+            "price-m2" : u"Pris per m²",
+            "size" : u"Storlek (m²)",
+            "rooms" : "Antal rum",
+            "fee" : u"Månadsavgift"
+        }
+                
         self.itemAverageTypes = {
             "age" : 0, 
             "price" : 0, 
@@ -185,6 +193,25 @@ class Hemnet() :
             final[k] = final[k]/len(data);
         return final;
 
+    def createResultItem(self, brokers):
+        result = []
+        for broker in brokers["results"].keys():
+            brokerItem = {
+                'name' : u'%s' % (broker),
+                'percentage': (1.0*brokers["results"][broker]["info"]["items"]/brokers['totalItems'])*100,
+                'items' : brokers["results"][broker]["items"],
+                'average' : brokers["results"][broker]["average"]
+            };
+            result.append(brokerItem);
+
+        result = sorted(result, key=lambda k: k['percentage'], reverse=True) 
+
+        resultItem = {
+            "totalItems" : brokers["totalItems"],
+            "results" : result
+        }
+        return resultItem;
+
     def parseItems(self, items, brokers):
         for idx, item in enumerate(items) :
             try:
@@ -196,15 +223,15 @@ class Hemnet() :
                     "price" : self.xpathToFloat(item.xpath('.//li[@class="price"]/a')),
                     "price-m2" : self.xpathToFloat(item.xpath('.//li[@class="price-per-m2"]/a')),
                     "fee" : self.xpathToFloat(item.xpath('.//li[@class="fee"]/a')),
-                    "address" : u'%s' % self.xpathToUnicode(item.xpath('.//li[@class="address"]/a')),
+                    "address" : self.xpathToUnicode(item.xpath('.//li[@class="address"]/a')),
                     "rooms" : self.xpathToFloat(item.xpath('.//li[@class="rooms"]/a')),
                     "size" : self.xpathToFloat(item.xpath('.//li[@class="living-area"]/a')),
-                    "type" : u'%s' % self.xpathToUnicode(item.xpath('.//li[@class="item-type"]/a')),
-                    "broker" : u'%s' % broker,
+                    "type" : self.xpathToUnicode(item.xpath('.//li[@class="item-type"]/a')),
+                    "broker" : broker,
                 }
                 try:
-                    brokers["results"].get(broker).get("items").append(hItem);
-                    brokers["results"][broker]["average"] = self.avgByKey(self.itemAverageTypes.keys(), brokers["data"][broker]["items"]);
+                    brokers["results"][broker]["items"].append(hItem);
+                    brokers["results"][broker]["average"] = self.avgByKey(self.itemAverageTypes.keys(), brokers["results"][broker]["items"]);
                 except Exception, e:
                     brokers["results"][broker] = {};
                     brokers["results"][broker]["items"] = [];
@@ -217,17 +244,32 @@ class Hemnet() :
                     'items' : len(brokers["results"][broker]["items"]),
                 };
                 brokers["results"][broker]["info"] = brokerItem;
-
+                brokers["totalItems"] = brokers["totalItems"]+1;
             except Exception,e:
                 pass;
         return brokers;
+
+    def printBroker(self, id, item):
+        name = UnicodeDammit(item.get("name"))
+        print "%s\n\t%s" % (id, name.unicode_markup);
+        print "\tObjekt\t: %s" % (len(item.get("items")));
+        print "\tAndel\t: %.2f%s" % (item.get("percentage"), "%");
+        print "\tMedel\t:"
+        if (len(item.get("items"))) > 1 :
+            for key in item.get("average").keys():
+                print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), item.get("average").get(key));
+        else:
+            print "\t\tn/a";
 
     def parseLocal(self):
         doc = self.unicodeResponse(open("response.html").read());
         brokers = {"totalItems" : 0, "results" : {}};
         result = self.parseItems(doc.xpath("//div[contains(@class, 'item result')]"), brokers); 
-        for item in result:
-            print json.dumps(item, indent=4);
+        result = self.createResultItem(result);
+        for idx, item in enumerate(result.get("results")):
+            if idx < 10:
+                self.printBroker(idx, item);
+
     def parseHousingItem(self, hElement):
         print "parse";
 
