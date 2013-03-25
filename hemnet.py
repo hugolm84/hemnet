@@ -136,8 +136,6 @@ class Hemnet() :
         request = urllib2.Request(self.baseSearch, urllib.urlencode(query), headers);
         return request;
 
-    def request(self, url):
-        return 
     '''
         Get the response from a url request
     '''
@@ -147,6 +145,7 @@ class Hemnet() :
         return response;
     
     '''
+        Retuns unicode response doc from url
     '''
     def requestUnicodeDoc(self, url):
         request = urllib2.Request(url)
@@ -173,6 +172,7 @@ class Hemnet() :
         if(len(item) > 0):
             return float(re.sub("([^0-9.])", "", item[0].text_content().replace(",", ".")));
         return 0.0;
+    
     '''
         Returns unicode from xpath object
     '''
