@@ -258,6 +258,9 @@ class Hemnet() :
         }
         return resultItem;
 
+    '''
+        Parses each item in result list
+    '''
     def parseItems(self, items, brokers):
         for idx, item in enumerate(items) :
             try:
@@ -318,13 +321,17 @@ class Hemnet() :
                 print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), item.get("average").get(key));
         else:
             print "\t\tn/a";
-
+    
+    '''
+        Print the header for search results
+    '''
     def printSearchHeader(self, result):
         print "\tHittade %s antal objekt" % result.get("totalItems");
         print "\tFrån %s antal mäklare" % len(result.get("results"));
         print "\tOmrådesdata:"
         for key in result.get("area-avg").keys():
             print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), result.get("area-avg").get(key));
+    
     '''
         Use for local testing
     '''
