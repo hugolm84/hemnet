@@ -66,47 +66,43 @@ class Hemnet() :
             "street" : "Gata",
             "city" : "Stad"
         }
+        #BaseAverageTypes  -> Swedish
         self.translatedAverageTypes = {
             "age" : u"List ålder",
             "price" : "Medelpris",
             "price-m2" : u"Pris per m²",
             "size" : u"Storlek (m²)",
             "rooms" : "Antal rum",
-            "fee" : u"Månadsavgift"
+            "fee" : u"Månadsavgift",
+            "price-change-up" : u"Prisökning (%)",
+            "price-change-down" : u"Prissäkning (%)"
         }
-                
+        
+        #Items to get average for        
         self.itemAverageTypes = {
             "age" : 0, 
             "price" : 0, 
             "price-m2" : 0, 
             "size" : 0, 
             "rooms" : 0, 
-            "fee" : 0
+            "fee" : 0,
+            "price-change-up" : 0,
+            "price-change-down" : 0
         };
 
+        #Base result format
+        self.resultFormat = {
+            "totalItems" : 0, 
+            "results" : {}
+        };
         #We need a cookiejar to store searches
         self._cj = cookielib.CookieJar();
         self._opener = urllib2.build_opener(HemnetHTTPRedirectHandler, urllib2.HTTPCookieProcessor(self._cj));
         urllib2.install_opener(self._opener);
-
-    def searchRequest(self, query) :
-        headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/html"};
-        request = urllib2.Request(self.baseSearch, urllib.urlencode(query), headers);
-        return request;
-
-    def getResponse(self, url, query = None) :
-        request = urllib2.Request(url, urllib.urlencode(query));
-        response = self._opener.open(request).read();
-        return response;
     
-    def getUnicodeDoc(self, request):
-        response = self._opener.open(request).read();
-        return self.unicodeResponse(response);
-
-    def unicodeResponse(self, response):
-        dammit = UnicodeDammit(response);
-        return fromstring(dammit.unicode_markup);
-
+    '''
+        Searchdata is a formpost in a very specific format
+    '''
     def createSearchData(self, data) :
         locationData = [{
             "id": (data.get("id")),
@@ -132,57 +128,60 @@ class Hemnet() :
         }
         return searchData;
 
-    def printLocations(self, data):
-        print "Hittade %s alternativ" % (len(data));
-        for id, item in enumerate(data) :
-            item = item.get("location");
-            itemType = self.translatedTypes.get(item.get("location_type"));
-            parent = item.get("parent_location");
-            parentType = self.translatedTypes.get(parent.get("location_type"));
-            print "%s %s %s" % (id, parent.get("name"), parentType);
-            print "\tTyp: %s" % (itemType);
-            print "\tNamn: %s" % (item.get("name"));
+    '''
+        Making a searchRequest requires searchData as params and request via POST
+    '''
+    def searchRequest(self, query) :
+        headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/html"};
+        request = urllib2.Request(self.baseSearch, urllib.urlencode(query), headers);
+        return request;
 
-    def findLocations(self, query) :
-        searchData = []
-        jdata = json.loads(self.getResponse(self.baseLocation, {'q' : query}));
-        for id, item in enumerate(jdata) :
-            searchData.append(self.createSearchData(item.get("location")))
-        return {'search' : searchData, 'locations' : jdata};
-
-    def makeSearch(self, searchData):
-        try :
-            return self.parseResult(self.getUnicodeDoc(self.searchRequest(searchData)), {"totalItems" : 0, "results" : {}});
-        except Exception,e :
-            print "Error getting search!"
-            print searchData;
-            print e
+    def request(self, url):
+        return 
+    '''
+        Get the response from a url request
+    '''
+    def getResponse(self, url, query = None) :
+        request = urllib2.Request(url, urllib.urlencode(query));
+        response = self._opener.open(request).read();
+        return response;
+    
+    '''
+    '''
+    def requestUnicodeDoc(self, url):
+        request = urllib2.Request(url)
+        return self.getUnicodeDoc(request);
 
     '''
-        Parse search results, recursive if theres a next page
+        Opens a request and returns a fromstring unicode response
     '''
-    def parseResult(self, doc, brokers = {}, sumItems = 0) :
-        listItems = doc.xpath("//div[contains(@class, 'item result')]");
-        sumItems = sumItems + len(listItems);
-        brokers = self.parseItems(listItems, brokers);
-        nextpage = doc.xpath('//a[@class="next_page"]');
-        try:
-            url = nextpage[0].attrib["href"];
-            if url is not None:
-                print "Parsing %s" % url;
-                self.parseResult(self.getUnicodeDoc(urllib2.Request(self.baseUrl + url)), brokers, sumItems);
-        except Exception,e:
-            print e;
+    def getUnicodeDoc(self, request):
+        response = self._opener.open(request).read();
+        return self.unicodeResponse(response);
 
-        brokers["totalItems"] = sumItems;
-        return brokers;
+    '''
+        Returns UnicodeDammit response as lxml doc
+    '''
+    def unicodeResponse(self, response):
+        dammit = UnicodeDammit(response);
+        return fromstring(dammit.unicode_markup);
 
+    '''
+        Returns floating point from xpath object
+    '''
     def xpathToFloat(self, item):
-        return float(re.sub("([^0-9.])", "", item[0].text_content().replace(",", ".")));
-
+        if(len(item) > 0):
+            return float(re.sub("([^0-9.])", "", item[0].text_content().replace(",", ".")));
+        return 0.0;
+    '''
+        Returns unicode from xpath object
+    '''
     def xpathToUnicode(self, item):
         return UnicodeDammit(item[0].text_content().strip()).unicode_markup;
 
+    '''
+        Pass a list of keys and a dict of data to caluclate average value for each key
+    '''
     def avgByKey(self, keys, data):
         final = {}
         for d in data:
@@ -193,21 +192,68 @@ class Hemnet() :
             final[k] = final[k]/len(data);
         return final;
 
+    '''
+        Find location and return json data from Query string
+    '''
+    def findLocations(self, query) :
+        searchData = []
+        jdata = json.loads(self.getResponse(self.baseLocation, {'q' : query}));
+        for id, item in enumerate(jdata) :
+            searchData.append(self.createSearchData(item.get("location")))
+        return {'search' : searchData, 'locations' : jdata};
+
+    '''
+        Performs a search request based on searchData
+    '''
+    def makeSearch(self, searchData):
+        try :
+            searchResponse = self.getUnicodeDoc(self.searchRequest(searchData));
+            result = self.parseResult(searchResponse, self.resultFormat);
+            return self.createResultItem(result);
+        except Exception,e :
+            print "Error: Kunde inte genomföra sökningen. Fel: %s" % e;
+
+    '''
+        Parse search results, recursive if theres a next page
+    '''
+    def parseResult(self, doc, brokers = {}) :
+        brokers = self.parseItems(doc.xpath("//div[contains(@class, 'item result')]"), brokers); 
+        nextpage = doc.xpath('//a[@class="next_page"]');
+        
+        try:
+            url = nextpage[0].attrib["href"];
+            if url is not None:
+                print "Parsing %s" % url;
+                self.parseResult(self.requestUnicodeDoc(self.baseUrl + url), brokers);
+        except Exception,e:
+            pass;
+        
+        return brokers;
+
+    '''
+        Formats a result list
+    '''
     def createResultItem(self, brokers):
         result = []
+        searchItems = []
         for broker in brokers["results"].keys():
             brokerItem = {
                 'name' : u'%s' % (broker),
-                'percentage': (1.0*brokers["results"][broker]["info"]["items"]/brokers['totalItems'])*100,
+                'percentage': (1.0*len(brokers["results"][broker]["items"])/brokers['totalItems'])*100,
                 'items' : brokers["results"][broker]["items"],
                 'average' : brokers["results"][broker]["average"]
             };
             result.append(brokerItem);
+            
+            for item in brokers["results"][broker]["items"]:
+                searchItems.append(item);
 
-        result = sorted(result, key=lambda k: k['percentage'], reverse=True) 
-
+        #Calculate area averages        
+        avg = self.avgByKey(self.itemAverageTypes.keys(), searchItems);
+        result = sorted(result, key=lambda k: k['percentage'], reverse=True)         
         resultItem = {
             "totalItems" : brokers["totalItems"],
+            "area-avg" : avg,
             "results" : result
         }
         return resultItem;
@@ -228,6 +274,8 @@ class Hemnet() :
                     "size" : self.xpathToFloat(item.xpath('.//li[@class="living-area"]/a')),
                     "type" : self.xpathToUnicode(item.xpath('.//li[@class="item-type"]/a')),
                     "broker" : broker,
+                    "price-change-up" : self.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change up')]")),
+                    "price-change-down" : self.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change down')]"))
                 }
                 try:
                     brokers["results"][broker]["items"].append(hItem);
@@ -238,21 +286,31 @@ class Hemnet() :
                     brokers["results"][broker]["items"].append(hItem);
                     brokers["results"][broker]["average"] = self.itemAverageTypes;
 
-                brokerItem = {
-                    'name' : u'%s' % (broker),
-                    'percentage': (1.0*len(brokers["results"][broker]["items"])/len(items)*100),
-                    'items' : len(brokers["results"][broker]["items"]),
-                };
-                brokers["results"][broker]["info"] = brokerItem;
                 brokers["totalItems"] = brokers["totalItems"]+1;
             except Exception,e:
+                print e
                 pass;
         return brokers;
 
+    '''
+        Prints location result from locationSearch 
+    '''
+    def printLocations(self, data):
+        print "Hittade %s alternativ" % (len(data));
+        for id, item in enumerate(data) :
+            item = item.get("location");
+            parent = item.get("parent_location");
+            print "%s %s %s" % (id, parent.get("name"), self.translatedTypes.get(parent.get("location_type")));
+            print "\tTyp: %s" % (self.translatedTypes.get(item.get("location_type")));
+            print "\tNamn: %s" % (item.get("name"));
+
+    '''
+        Prints Broker item
+    '''
     def printBroker(self, id, item):
         name = UnicodeDammit(item.get("name"))
         print "%s\n\t%s" % (id, name.unicode_markup);
-        print "\tObjekt\t: %s" % (len(item.get("items")));
+        print "\tObjekt\t: %s" % len((item.get("items")));
         print "\tAndel\t: %.2f%s" % (item.get("percentage"), "%");
         print "\tMedel\t:"
         if (len(item.get("items"))) > 1 :
@@ -261,18 +319,27 @@ class Hemnet() :
         else:
             print "\t\tn/a";
 
+    def printSearchHeader(self, result):
+        print "\tHittade %s antal objekt" % result.get("totalItems");
+        print "\tFrån %s antal mäklare" % len(result.get("results"));
+        print "\tOmrådesdata:"
+        for key in result.get("area-avg").keys():
+            print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), result.get("area-avg").get(key));
+    '''
+        Use for local testing
+    '''
     def parseLocal(self):
         doc = self.unicodeResponse(open("response.html").read());
         brokers = {"totalItems" : 0, "results" : {}};
         result = self.parseItems(doc.xpath("//div[contains(@class, 'item result')]"), brokers); 
         result = self.createResultItem(result);
-        for idx, item in enumerate(result.get("results")):
-            if idx < 10:
-                self.printBroker(idx, item);
+        self.printSearchHeader(result);
+        for idx, item in enumerate(result.get("results")[:10]):
+            self.printBroker(idx, item);
 
-    def parseHousingItem(self, hElement):
-        print "parse";
-
+    '''
+        Menu
+    '''
     def menu(self) :
         answer = True;
         while(answer):
@@ -282,18 +349,11 @@ class Hemnet() :
 
             index = raw_input("Välj alternativ: ");
             result = self.makeSearch(queryResponse['search'][int(index)]);
-            
-            print "Found %s results" % result.get("totalItems");
-            
-            for idx, item in enumerate(result.get("results")):
-                print json.dumps(item, indent=4);
-            #    print item["info"];
-                #name = UnicodeDammit(item.get("info").get("name"));
-                #print "%s\n\t%s" % (idx, name.unicode_markup);
-                #print "\tObjekt:%s" % (item.get("items"));
-                #print "\tAndel: %s%s" % (item.get("percentage"), "%");'''
+            self.printSearchHeader(result);
+            for idx, item in enumerate(result.get("results")[:10]):
+                self.printBroker(idx, item);
 
 if __name__ == "__main__":
     hemnet = Hemnet();
     #hemnet.menu();
-    hemnet.parseLocal()
+    hemnet.parseLocal();
