@@ -22,7 +22,7 @@ from bs4 import UnicodeDammit
 
 from helpers.logger import Logger
 from helpers.request import Request
-from helpers.lxml import LxmlHelper
+from helpers.lxmlHelper import LxmlHelper
 
 
 class Hemnet() :
@@ -79,7 +79,7 @@ class Hemnet() :
     '''
         Searchdata is a formpost in a very specific format
     '''
-    def createSearchData(self, data) :
+    def createSearchFormData(self, data) :
         locationData = [{
             "id": (data.get("id")),
             "name": (data.get("name")),
@@ -104,9 +104,6 @@ class Hemnet() :
         }
         return searchData;
 
-    '''
-        Making a searchRequest requires searchData as params and request via POST
-    '''
     def searchRequest(self, query) :
         return self.request.postRequest(self.baseSearch, query);
 
@@ -123,20 +120,20 @@ class Hemnet() :
             final[k] = final[k]/len(data);
         return final;
 
-    '''
-        Find location and return json data from Query string
-    '''
-    def findLocations(self, query) :
-        searchData = []
-        jdata = json.loads(self.request.getResponse(self.baseLocation, {'q' : query}));
-        for id, item in enumerate(jdata) :
-            searchData.append(self.createSearchData(item.get("location")));
-        return {'search' : searchData, 'locations' : jdata};
 
-    '''
-        Performs a search request based on searchData
-    '''
-    def makeSearch(self, searchData):
+    def findLocations(self, query) :
+        locFormData = []
+        locResponse = self.request.getResponse(self.baseLocation, {'q' : query})
+        jdata = json.loads(locResponse);
+        
+        for id, item in enumerate(jdata) :
+            formData = self.createSearchFormData(item.get("location"))
+            locFormData.append(formData);
+        
+        return {'search' : locFormData, 'locations' : jdata};
+
+
+    def performSearch(self, searchData):
         try :
             searchRequest = self.searchRequest(searchData);
             searchResponse = self.request.getUnicodeDoc(searchRequest);
@@ -145,9 +142,7 @@ class Hemnet() :
         except Exception,e :
             self.log.critical("Error: Kunde inte genomföra sökningen %s" % e);
 
-    '''
-        Parse search results, recursive if theres a next page
-    '''
+
     def parseResult(self, doc, brokers = {}) :
         brokers = self.parseItems(doc.xpath("//div[contains(@class, 'item result')]"), brokers); 
         nextpage = doc.xpath('//a[@class="next_page"]');
@@ -164,9 +159,8 @@ class Hemnet() :
         
         return brokers;
 
-    '''
-        Formats a result list
-    '''
+
+
     def createResultItem(self, brokers):
         result = []
         searchItems = []
@@ -192,9 +186,8 @@ class Hemnet() :
         }
         return resultItem;
 
-    '''
-        Parses each item in result list
-    '''
+
+
     def parseItems(self, items, brokers):
         for idx, item in enumerate(items) :
             try:
@@ -236,16 +229,12 @@ class Hemnet() :
                 pass;
         return brokers;
 
-    '''
-        Prints location result from locationSearch 
-    '''
+
     def printLocations(self, data):
         for id, item in enumerate(data) :
             print "%s %s" % (id, self.printableLocation(item))
 
-    '''
-        Prints one location
-    '''
+
     def printableLocation(self, item):
         item = item.get("location");
         parent = item.get("parent_location");
@@ -255,9 +244,7 @@ class Hemnet() :
         parentLocName = parent.get("name");
         return "%s %s\n\tTyp: %s\n\tNamn: %s" % (parentLocName, parentLocType,  locType, locName);
     
-    '''
-        Prints Broker item
-    '''
+
     def printBroker(self, id, item):
         name = UnicodeDammit(item.get("name"))
         print "%s\n\t%s" % (id, name.unicode_markup);
@@ -272,15 +259,12 @@ class Hemnet() :
 
         #for listItem in item.get("items"):
         #   self.printListItem(listItem);
-    
-    '''
-    '''
+
+
     def printListItem(self, item):
         print json.dumps(item, indent=4);
 
-    '''
-        Print the header for search results
-    '''
+
     def printSearchHeader(self, result, location):
         print "\tHittade %s antal objekt" % result.get("totalItems");
         print "\tFrån %s antal mäklare" % len(result.get("results"));
@@ -301,9 +285,7 @@ class Hemnet() :
         for idx, item in enumerate(result.get("results")[:10]):
             self.printBroker(idx, item);
 
-    '''
-        Menu
-    '''
+
     def menu(self) :
         answer = True;
         while(answer):
@@ -315,7 +297,7 @@ class Hemnet() :
                 self.printLocations(queryResponse["locations"]);
 
                 index = raw_input("Välj alternativ: ");
-                result = self.makeSearch(queryResponse['search'][int(index)]);
+                result = self.performSearch(queryResponse['search'][int(index)]);
                 self.printSearchHeader(result, queryResponse['locations'][int(index)]);
                 for idx, item in enumerate(result.get("results")[:10]):
                     self.printBroker(idx, item);
