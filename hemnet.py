@@ -18,37 +18,18 @@
 '''
 
 import json
-import re
-import string
-import urllib2
-import httplib
-import urllib, cookielib
-from lxml.html import fromstring, tostring, parse, submit_form
 from bs4 import UnicodeDammit
-import logging
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s %(levelname)-5.5s [%(name)s] %(message)s'
-)
+from helpers.logger import Logger
+from helpers.request import Request
+from helpers.lxml import LxmlHelper
 
-'''
-    @HemnetHTTPRedirect
-'''
-class HemnetHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
-    def http_error_302(self, req, fp, code, msg, headers):
-        return urllib2.HTTPRedirectHandler.http_error_302(self, req, fp, code, msg, headers)
-    def http_error_404(self, req, fp, code, msg, headers):
-        print "error";
-    http_error_301 = http_error_303 = http_error_307 = http_error_302
-
-'''
-    @Hemnet
-    Baseclass for hemnet
-'''
 
 class Hemnet() :
     def __init__(self):
+        self.log = Logger("Hemnet");
+        self.request = Request();
+
         #Base objects for searches and results
         self.baseUrl = "http://www.hemnet.se";
         self.baseSearch = self.baseUrl + "/sok/create";
@@ -93,10 +74,7 @@ class Hemnet() :
             "totalItems" : 0, 
             "results" : {}
         };
-        #We need a cookiejar to store searches
-        self._cj = cookielib.CookieJar();
-        self._opener = urllib2.build_opener(HemnetHTTPRedirectHandler, urllib2.HTTPCookieProcessor(self._cj));
-        urllib2.install_opener(self._opener);
+        self.log.info("Initiated Hemnet");
     
     '''
         Searchdata is a formpost in a very specific format
@@ -130,52 +108,7 @@ class Hemnet() :
         Making a searchRequest requires searchData as params and request via POST
     '''
     def searchRequest(self, query) :
-        headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/html"};
-        request = urllib2.Request(self.baseSearch, urllib.urlencode(query), headers);
-        return request;
-
-    '''
-        Get the response from a url request
-    '''
-    def getResponse(self, url, query = None) :
-        request = urllib2.Request(url, urllib.urlencode(query));
-        response = self._opener.open(request).read();
-        return response;
-    
-    '''
-        Retuns unicode response doc from url
-    '''
-    def requestUnicodeDoc(self, url):
-        request = urllib2.Request(url)
-        return self.getUnicodeDoc(request);
-
-    '''
-        Opens a request and returns a fromstring unicode response
-    '''
-    def getUnicodeDoc(self, request):
-        response = self._opener.open(request).read();
-        return self.unicodeResponse(response);
-
-    '''
-        Returns UnicodeDammit response as lxml doc
-    '''
-    def unicodeResponse(self, response):
-        dammit = UnicodeDammit(response);
-        return fromstring(dammit.unicode_markup);
-
-    '''
-        Returns floating point from xpath object
-    '''
-    def xpathToFloat(self, item):
-        if(len(item) > 0):
-            return float(re.sub("([^0-9.])", "", item[0].text_content().replace(",", ".")));
-        return 0.0;
-    
-    '''
-        Returns unicode from xpath object
-    '''
-    def xpathToUnicode(self, item):
-        return UnicodeDammit(item[0].text_content().strip()).unicode_markup;
+        return self.request.postRequest(self.baseSearch, query);
 
     '''
         Pass a list of keys and a dict of data to caluclate average value for each key
@@ -195,9 +128,9 @@ class Hemnet() :
     '''
     def findLocations(self, query) :
         searchData = []
-        jdata = json.loads(self.getResponse(self.baseLocation, {'q' : query}));
+        jdata = json.loads(self.request.getResponse(self.baseLocation, {'q' : query}));
         for id, item in enumerate(jdata) :
-            searchData.append(self.createSearchData(item.get("location")))
+            searchData.append(self.createSearchData(item.get("location")));
         return {'search' : searchData, 'locations' : jdata};
 
     '''
@@ -205,11 +138,12 @@ class Hemnet() :
     '''
     def makeSearch(self, searchData):
         try :
-            searchResponse = self.getUnicodeDoc(self.searchRequest(searchData));
-            result = self.parseResult(searchResponse, self.resultFormat);
-            return self.createResultItem(result);
+            searchRequest = self.searchRequest(searchData);
+            searchResponse = self.request.getUnicodeDoc(searchRequest);
+            resultData = self.parseResult(searchResponse, self.resultFormat);
+            return self.createResultItem(resultData);
         except Exception,e :
-            print "Error: Kunde inte genomföra sökningen. Fel: %s" % e;
+            self.log.critical("Error: Kunde inte genomföra sökningen %s" % e);
 
     '''
         Parse search results, recursive if theres a next page
@@ -221,9 +155,11 @@ class Hemnet() :
         try:
             url = nextpage[0].attrib["href"];
             if url is not None:
-                print "Parsing %s" % url;
-                self.parseResult(self.requestUnicodeDoc(self.baseUrl + url), brokers);
+                self.log.info("Parsing %s" % url);
+                nextDoc = self.request.requestUnicodeDoc(self.baseUrl + url);
+                self.parseResult(nextDoc, brokers);
         except Exception,e:
+            self.log.debug("ParseResult %s" % e)
             pass;
         
         return brokers;
@@ -266,18 +202,25 @@ class Hemnet() :
                 broker = broker[0].attrib['title'];
                 hItem =  {
                     "id" : item.attrib['data-item-id'],
-                    "age" : self.xpathToFloat(item.xpath('.//li[@class="age"]/a/span')),
-                    "price" : self.xpathToFloat(item.xpath('.//li[@class="price"]/a')),
-                    "price-m2" : self.xpathToFloat(item.xpath('.//li[@class="price-per-m2"]/a')),
-                    "fee" : self.xpathToFloat(item.xpath('.//li[@class="fee"]/a')),
-                    "address" : self.xpathToUnicode(item.xpath('.//li[@class="address"]/a')),
-                    "rooms" : self.xpathToFloat(item.xpath('.//li[@class="rooms"]/a')),
-                    "size" : self.xpathToFloat(item.xpath('.//li[@class="living-area"]/a')),
-                    "type" : self.xpathToUnicode(item.xpath('.//li[@class="item-type"]/a')),
+                    "age" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="age"]/a/span')),
+                    "price" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price"]/a')),
+                    "price-m2" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price-per-m2"]/a')),
+                    "fee" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="fee"]/a')),
+                    "address" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="address"]/a')),
+                    "rooms" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="rooms"]/a')),
+                    "size" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="living-area"]/a')),
+                    "type" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="item-type"]/a')),
                     "broker" : broker,
-                    "price-change-up" : self.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change up')]")),
-                    "price-change-down" : self.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change down')]"))
+                    "price-change-up" : LxmlHelper.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change up')]")),
+                    "price-change-down" : LxmlHelper.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change down')]"))
                 }
+
+                try:
+                    if hItem["price-m2"] < 1:
+                        hItem["price-m2"] = float(hItem["price"]/hItem["size"]);
+                except Exception, e:
+                    self.log.debug("Failed to calculate price-m2 %s", e)
+                    
                 try:
                     brokers["results"][broker]["items"].append(hItem);
                     brokers["results"][broker]["average"] = self.avgByKey(self.itemAverageTypes.keys(), brokers["results"][broker]["items"]);
@@ -289,6 +232,7 @@ class Hemnet() :
 
                 brokers["totalItems"] = brokers["totalItems"]+1;
             except Exception,e:
+                self.log.debug("ParseItem %s" % e)
                 pass;
         return brokers;
 
@@ -325,7 +269,15 @@ class Hemnet() :
                 print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), item.get("average").get(key));
         else:
             print "\t\tn/a";
+
+        #for listItem in item.get("items"):
+        #   self.printListItem(listItem);
     
+    '''
+    '''
+    def printListItem(self, item):
+        print json.dumps(item, indent=4);
+
     '''
         Print the header for search results
     '''
@@ -357,14 +309,19 @@ class Hemnet() :
         while(answer):
             query = raw_input("Sökterm: ");
             queryResponse = self.findLocations(query);
-            print "Hittade %s alternativ" % (len(queryResponse["locations"]));
-            self.printLocations(queryResponse["locations"]);
+            resultCount = len(queryResponse["locations"]);
+            if resultCount != 0 :
+                print "Hittade %s alternativ" % (len(queryResponse["locations"]));
+                self.printLocations(queryResponse["locations"]);
 
-            index = raw_input("Välj alternativ: ");
-            result = self.makeSearch(queryResponse['search'][int(index)]);
-            self.printSearchHeader(result, queryResponse['locations'][int(index)]);
-            for idx, item in enumerate(result.get("results")[:10]):
-                self.printBroker(idx, item);
+                index = raw_input("Välj alternativ: ");
+                result = self.makeSearch(queryResponse['search'][int(index)]);
+                self.printSearchHeader(result, queryResponse['locations'][int(index)]);
+                for idx, item in enumerate(result.get("results")[:10]):
+                    self.printBroker(idx, item);
+            else:
+                self.log.debug("Failed to find results for %s : %s" % (query, json.dumps(queryResponse)))
+                print "Inga alternativ hittades baserat på %s" % query;
 
 if __name__ == "__main__":
     hemnet = Hemnet();
