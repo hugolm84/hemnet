@@ -23,7 +23,8 @@ from bs4 import UnicodeDammit
 from helpers.logger import Logger
 from helpers.request import Request
 from helpers.lxmlHelper import LxmlHelper
-
+import Levenshtein
+from operator import itemgetter
 
 class Hemnet() :
     def __init__(self):
@@ -35,6 +36,7 @@ class Hemnet() :
         self.baseSearch = self.baseUrl + "/sok/create";
         self.baseLocation = self.baseUrl + "/locations/show?";
         self.baseResult = self.baseUrl + "/resultat";
+        self.searchQuery = {}
 
         #Basetype, english -> Swedish
         self.translatedTypes = {
@@ -49,24 +51,35 @@ class Hemnet() :
         self.translatedAverageTypes = {
             "age" : u"List ålder",
             "price" : "Medelpris",
-            "price-m2" : u"Pris per m²",
+            "price_m2" : u"Pris per m²",
             "size" : u"Storlek (m²)",
             "rooms" : "Antal rum",
             "fee" : u"Månadsavgift",
-            "price-change-up" : u"Prisökning (%)",
-            "price-change-down" : u"Prissäkning (%)"
+            "price_change_up" : u"Prisökning (%)",
+            "price_change_down" : u"Prissäkning (%)"
         }
         
+        #searchTypes
+        self.searchTypes = {
+            "f" : "fritidshus",
+            "v" : "villa",
+            "t" : "tomt",
+            "r" : "radhus",
+            "g" : "gard",
+            "b" : "bostadsratt",
+            "o" : "other",
+            "a" : "all"
+        }
         #Items to get average for        
         self.itemAverageTypes = {
             "age" : 0, 
             "price" : 0, 
-            "price-m2" : 0, 
+            "price_m2" : 0, 
             "size" : 0, 
             "rooms" : 0, 
             "fee" : 0,
-            "price-change-up" : 0,
-            "price-change-down" : 0
+            "price_change_up" : 0,
+            "price_change_down" : 0
         };
 
         #Base result format
@@ -79,7 +92,7 @@ class Hemnet() :
     '''
         Searchdata is a formpost in a very specific format
     '''
-    def createSearchFormData(self, data) :
+    def createSearchFormData(self, data, specificType = 'a') :
         locationData = [{
             "id": (data.get("id")),
             "name": (data.get("name")),
@@ -93,7 +106,7 @@ class Hemnet() :
             "search[region_id]":-1,
             "search[municipality_ids][]":-1,
             "search[country_id]":0,
-            "search[item_types][]": 'all',
+            "search[item_types][]": "%s" % self.searchTypes[specificType],
             "search[price_min]": '',
             "search[price_max]": '',
             "search[fee_max]": '',
@@ -121,26 +134,39 @@ class Hemnet() :
         return final;
 
 
-    def findLocations(self, query) :
+    def findLocations(self, query, extra, area = None) :
         locFormData = []
-        locResponse = self.request.getResponse(self.baseLocation, {'q' : query})
+        queryURL = "%sq=%s" % (self.baseLocation, urllib.quote(query.encode('utf-8')))
+        locResponse = self.request.getResponse(queryURL, None)
         jdata = json.loads(locResponse);
-        
+        formData = {}
+        locations = []
         for id, item in enumerate(jdata) :
-            formData = self.createSearchFormData(item.get("location"))
-            locFormData.append(formData);
-        
-        return {'search' : locFormData, 'locations' : jdata};
+            item["score"] = Levenshtein.ratio(item.get("location").get("name"), query)
+            if( area is not None ):
+                if( item.get("location").get("parent_location").get("name") in area):
+                    formData = self.createSearchFormData(item.get("location"), extra);
+                    locations.append(item)
+                    locFormData.append(formData);
+            else: 
+                formData = self.createSearchFormData(item.get("location"), extra);
+                locations.append(item)    
+                locFormData.append(formData);
+
+
+        locations = sorted(locations, key=itemgetter('score'), reverse=True)
+        return {'search' : locFormData, 'area' : area, 'locations' : locations };
+
 
 
     def performSearch(self, searchData):
-        try :
-            searchRequest = self.searchRequest(searchData);
-            searchResponse = self.request.getUnicodeDoc(searchRequest);
-            resultData = self.parseResult(searchResponse, self.resultFormat);
-            return self.createResultItem(resultData);
-        except Exception,e :
-            self.log.critical("Error: Kunde inte genomföra sökningen %s" % e);
+        #try :
+        searchRequest = self.searchRequest(searchData);
+        searchResponse = self.request.getUnicodeDoc(searchRequest);
+        resultData = self.parseResult(searchResponse, self.resultFormat);
+        return self.createResultItem(resultData);
+        #except Exception,e :
+        #    self.log.critical("Error: Kunde inte genomföra sökningen %s" % e);
 
 
     def parseResult(self, doc, brokers = {}) :
@@ -181,7 +207,7 @@ class Hemnet() :
         result = sorted(result, key=lambda k: k['percentage'], reverse=True)         
         resultItem = {
             "totalItems" : brokers["totalItems"],
-            "area-avg" : avg,
+            "area_avg" : avg,
             "results" : result
         }
         return resultItem;
@@ -196,21 +222,21 @@ class Hemnet() :
                 hItem =  {
                     "id" : item.attrib['data-item-id'],
                     "age" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="age"]/a/span')),
-                    "price" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price"]/a')),
-                    "price-m2" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price-per-m2"]/a')),
-                    "fee" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="fee"]/a')),
-                    "address" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="address"]/a')),
-                    "rooms" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="rooms"]/a')),
-                    "size" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="living-area"]/a')),
-                    "type" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="item-type"]/a')),
+                    "price" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price"]')),
+                    "price_m2" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price-per-m2"]')),
+                    "fee" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="fee"]')),
+                    "address" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="address"]')),
+                    "rooms" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="rooms"]')),
+                    "size" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="living-area"]')),
+                    "type" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="item-type"]')),
                     "broker" : broker,
-                    "price-change-up" : LxmlHelper.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change up')]")),
-                    "price-change-down" : LxmlHelper.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change down')]"))
+                    "price_change_up" : LxmlHelper.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change up')]")),
+                    "price_change_down" : LxmlHelper.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change down')]"))
                 }
 
                 try:
-                    if hItem["price-m2"] < 1:
-                        hItem["price-m2"] = float(hItem["price"]/hItem["size"]);
+                    if hItem["price_m2"] < 0:
+                        hItem["price_m2"] = float(hItem["price"]/hItem["size"]);
                 except Exception, e:
                     self.log.debug("Failed to calculate price-m2 %s", e)
                     
@@ -257,8 +283,8 @@ class Hemnet() :
         else:
             print "\t\tn/a";
 
-        #for listItem in item.get("items"):
-        #   self.printListItem(listItem);
+        for listItem in item.get("items"):
+           self.printListItem(listItem);
 
 
     def printListItem(self, item):
@@ -270,14 +296,14 @@ class Hemnet() :
         print "\tFrån %s antal mäklare" % len(result.get("results"));
         print u"\tSökterm: \n\t\t%s" % self.printableLocation(location).replace('\t', '\t\t');
         print "\tOmrådesdata:"
-        for key in result.get("area-avg").keys():
-            print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), result.get("area-avg").get(key));
+        for key in result.get("area_avg").keys():
+            print "\t\t%s\t: %.2f" % (self.translatedAverageTypes.get(key), result.get("area_avg").get(key));
     
     '''
         Use for local testing
     '''
     def parseLocal(self):
-        doc = self.unicodeResponse(open("response.html").read());
+        doc = Request.s_unicodeResponse(open("response.html").read());
         brokers = {"totalItems" : 0, "results" : {}};
         result = self.parseItems(doc.xpath("//div[contains(@class, 'item result')]"), brokers); 
         result = self.createResultItem(result);
@@ -290,7 +316,8 @@ class Hemnet() :
         answer = True;
         while(answer):
             query = raw_input("Sökterm: ");
-            queryResponse = self.findLocations(query);
+            extra = raw_input("Typ: ");
+            queryResponse = self.findLocations(query, extra);
             resultCount = len(queryResponse["locations"]);
             if resultCount != 0 :
                 print "Hittade %s alternativ" % (len(queryResponse["locations"]));
@@ -305,7 +332,90 @@ class Hemnet() :
                 self.log.debug("Failed to find results for %s : %s" % (query, json.dumps(queryResponse)))
                 print "Inga alternativ hittades baserat på %s" % query;
 
-if __name__ == "__main__":
+    def debugMenu(self) :
+        query = "Danderyd";
+        extra = "v";
+        queryResponse = self.findLocations(query, extra);
+        resultCount = len(queryResponse["locations"]);
+        if resultCount != 0 :
+            print "Hittade %s alternativ" % (len(queryResponse["locations"]));
+            index = 0;
+            result = self.performSearch(queryResponse['search'][int(index)]);
+            self.printSearchHeader(result, queryResponse['locations'][int(index)]); 
+            for idx, item in enumerate(result.get("results")[:10]):
+                    self.printBroker(idx, item);
+        else:
+            self.log.debug("Failed to find results for %s : %s" % (query, json.dumps(queryResponse)))
+            print "Inga alternativ hittades baserat på %s" % query;
+
+    def unicode(self, input) :
+        return urllib.quote(input.encode('utf-8'))
+
+'''if __name__ == "__main__":
     hemnet = Hemnet();
     hemnet.menu();
     #hemnet.parseLocal();
+
+'''
+from flask import Blueprint, make_response, jsonify, request
+from datetime import datetime, timedelta
+import dateutil.relativedelta as reldate
+#
+#system
+#
+import urllib
+hemnet = Blueprint('hemnet', __name__)
+HemNet = Hemnet()
+
+## Routes and Handlers ##
+
+# Default expires next day at 1AM
+def timedeltaUntilDays(days=1, hour=1) :
+    today = datetime.utcnow()
+    expires = datetime.replace(today + timedelta(days=days), hour=hour, minute=0, second=0)
+    return dict({"expires" : expires-today, "date" : expires, 'seconds' :  (expires-today).total_seconds() })
+
+def setCacheControl(header, delta):
+    today = datetime.utcnow()
+    expires = today + timedelta(seconds=delta['seconds'])
+    header.add("Expires", int((expires - datetime.utcfromtimestamp(0)).total_seconds()))
+    header.add("Max-Age" , int(delta['seconds']))
+    header.add("Last-Modified" , today.strftime("%a, %d %b %Y %H:%M:%S +0000"))
+    header.add("Date-Expires" , expires.strftime("%a, %d %b %Y %H:%M:%S +0000"))
+    return header;
+
+@hemnet.route('/hemnet/search/<area>/<query>/<type>')
+def search(area, query, type):
+
+    queryResponse = HemNet.findLocations(query, type, area);
+    locationCount = len(queryResponse["locations"]);
+    resultCount = 0;
+    result = {}
+    
+    if locationCount != 0 :
+        result = HemNet.performSearch(queryResponse['search'][int(0)]);
+        resultCount = len(result);
+    
+    response = make_response( jsonify(
+        {
+            'request': query,
+            'resultcount' : resultCount,
+            'queryResponse' : queryResponse,
+            'prefix': '/search/query/type',
+            'locationcount': resultCount,
+            'result' : result
+        }
+    ))
+
+    #response.headers = setCacheControl(response.headers, timedeltaUntilDays(10));
+    return response
+
+@hemnet.route('/hemnet')
+def welcome():
+    response = make_response( jsonify(
+        {
+            'welcome': "request",
+            'prefix': '/hemnet/'
+        }
+    ))
+    return response

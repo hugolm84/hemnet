@@ -33,32 +33,45 @@ class RequestRedirectHandler(urllib2.HTTPRedirectHandler):
 
 
 class Request():
+
+    __request = None;
+
     def __init__(self):
         self._cj = cookielib.CookieJar();
         self._opener = urllib2.build_opener(RequestRedirectHandler, urllib2.HTTPCookieProcessor(self._cj));
         urllib2.install_opener(self._opener);
-    
+
     def postRequest(self, url, postParams) :
         headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/html"};
-        request = urllib2.Request(url, urllib.urlencode(postParams), headers);
-        return request;
-
+        self.__request = urllib2.Request(url, urllib.urlencode(postParams), headers);
+        return self.__request;
 
     def getResponse(self, url, query = None) :
-        request = urllib2.Request(url, urllib.urlencode(query));
-        response = self._opener.open(request).read();
+        if(query is None) :
+            print "Getting response from %s" % url;
+            self.__request = urllib2.Request(url);
+        else : 
+            self.__request = urllib2.Request(url, urllib.urlencode(query));
+
+            print "Getting response from %s with query %s" % (url, urllib.urlencode(query));
+
+        response = self._opener.open(self.__request).read();
         return response;
     
 
     def requestUnicodeDoc(self, url):
-        request = urllib2.Request(url)
-        return self.getUnicodeDoc(request);
+        self.__request = urllib2.Request(url)
+        return self.getUnicodeDoc(self.__request);
 
 
     def getUnicodeDoc(self, request):
         response = self._opener.open(request).read();
         return self.unicodeResponse(response);
 
+    @staticmethod
+    def s_unicodeResponse(response):
+        dammit = UnicodeDammit(response);
+        return fromstring(dammit.unicode_markup);
 
     def unicodeResponse(self, response):
         dammit = UnicodeDammit(response);
