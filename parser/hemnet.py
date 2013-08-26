@@ -142,12 +142,13 @@ class Hemnet() :
         queryURL = "%sq=%s" % (self.baseLocation, urllib.quote(query.encode('utf-8')))
         locResponse = self.request.getResponse(queryURL, None)
         jdata = json.loads(locResponse);
+        print json.dumps(jdata, indent=4);
         formData = {}
         locations = []
         for id, item in enumerate(jdata) :
             item["score"] = Levenshtein.ratio(item.get("location").get("name"), query)
             if( area is not None ):
-                if( item.get("location").get("parent_location").get("name") in area):
+                if( item.get("location").get("parent_location").get("name").find(area) != -1 ):
                     formData = self.createSearchFormData(item.get("location"), extra);
                     locations.append(item)
                     locFormData.append(formData);
