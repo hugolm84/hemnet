@@ -136,10 +136,18 @@ class Hemnet() :
             final[k] = final[k]/len(data);
         return final;
 
-    #@cache.methodcache.cache('findLocations', expire=72000)    
+    def getLocationQueryURL(self, query):
+        return "%sq=%s" % (self.baseLocation, urllib.quote(query.encode('utf-8')))
+
+    @cache.methodcache.cache('findLocations', expire=72000)    
     def findLocations(self, query, extra, area = None) :
+        queryURL = self.getLocationQueryURL(query);
+        cacheResult = cache.locations.get(hashlib.md5(queryURL).hexdigest());
+        if( cacheResult is not None):
+            print "Found cached loc";
+            return cacheResult;
+
         locFormData = []
-        queryURL = "%sq=%s" % (self.baseLocation, urllib.quote(query.encode('utf-8')))
         locResponse = self.request.getResponse(queryURL, None)
         jdata = json.loads(locResponse);
         print json.dumps(jdata, indent=4);
@@ -163,16 +171,22 @@ class Hemnet() :
         cache.locations[hashlib.md5(queryURL).hexdigest()] = result
         return result;
 
-
-
-    @cache.methodcache.cache('performSearch', expire=7200) 
+    @cache.methodcache.cache('performSearch', expire=72000) 
     def performSearch(self, searchData):
+        hashkey = hashlib.md5(
+            json.dumps(searchData, sort_keys=True)
+        ).hexdigest();
+        cachedResult = cache.storage.get(hashkey);
+        if(cachedResult is not None):
+            print "Found cached searchResponse";
+            return cachedResult;
+
         print "Performing search on " + json.dumps(searchData, indent=4); 
         searchRequest = self.searchRequest(searchData);
         searchResponse = self.request.getUnicodeDoc(searchRequest);
         resultData = self.parseResult(searchResponse, self.resultFormat);
         result = self.createResultItem(resultData);
-        hashkey = hashlib.md5(json.dumps(searchData, sort_keys=True)).hexdigest();
+        
         print "Storing hash " + hashkey;
 
 
@@ -182,7 +196,7 @@ class Hemnet() :
         metadata_keys = filter(lambda k: k != 'list', result.keys())
         metadata = { key: result[key] for key in metadata_keys }
         chart_list[hashkey] = metadata
-        cache.storage[hashkey] = chart_list
+        cache.storage[hashkey] = chart_list[hashkey]
         return result;
 
 
@@ -239,12 +253,12 @@ class Hemnet() :
                 hItem =  {
                     "id" : item.attrib['data-item-id'],
                     "age" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="age"]/a/span')),
-                    "price" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price"]')),
+                    "price" : LxmlHelper.xpathToFloat(item.xpath('.//li[contains(@class, "price")]')),
                     "price_m2" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="price-per-m2"]')),
                     "fee" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="fee"]')),
                     "address" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="address"]')),
                     "rooms" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="rooms"]')),
-                    "size" : LxmlHelper.xpathToFloat(item.xpath('.//li[@class="living-area"]')),
+                    "size" : LxmlHelper.xpathToFloat(item.xpath('.//li[contains(@class, "living-area")]')),
                     "type" : LxmlHelper.xpathToUnicode(item.xpath('.//li[@class="item-type"]')),
                     "broker" : broker,
                     "price_change_up" : LxmlHelper.xpathToFloat(item.xpath(".//div[contains(@class, 'price-change up')]")),
@@ -252,8 +266,9 @@ class Hemnet() :
                 }
 
                 try:
-                    if hItem["price_m2"] < 0:
-                        hItem["price_m2"] = float(hItem["price"]/hItem["size"]);
+
+                    hItem["price_m2"] = float(hItem["price"]/hItem["size"]);
+                    
                 except Exception, e:
                     self.log.debug("Failed to calculate price-m2 %s", e)
                     

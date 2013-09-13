@@ -48,7 +48,7 @@ def search(area, query, type):
         }
     ))
 
-    response.headers = cache.setCacheControl(response.headers, 7200);
+    response.headers = cache.setCacheControl(response.headers, 72000);
     return response
 
 @hemnet.route('/hemnet/locationsearch/<query>')

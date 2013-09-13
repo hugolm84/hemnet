@@ -44,5 +44,6 @@ if __name__ == '__main__':
         #log.startLogging(DailyLogFile.fromFullPath("logs/charts-twisted.log"))
     # Start the service
     resource = WSGIResource(reactor, reactor.getThreadPool(), app)
-    reactor.listenTCP(8080, Site(resource), interface="10.0.1.17")
+    reactor.listenTCP(8080, Site(resource), interface="10.0.1.8")
     reactor.run()
+
